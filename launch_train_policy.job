@@ -10,4 +10,5 @@
 
 
 module load python
+pip install safety-gymnasium
 python3 train_policy.py
