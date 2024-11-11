@@ -13,10 +13,11 @@ from stable_baselines3.common.noise import NormalActionNoise
 
 
 task_list = ['Goal', 'Push', 'Button', 'Race']
-alg_list = [PPO, A2C, SAC, TD3]
+# alg_list = [PPO, A2C, SAC, TD3]
+alg_list = [PPO]
 render_mode = None
 policy_kwargs = dict(activation_fn=th.nn.ReLU,
-                     net_arch=dict(pi=[128, 64], vf=[128, 64], qf=[128,64]))
+                     net_arch=dict(pi=[128, 64], vf=[128, 64]))
 # print(alg_list[0].__name__)
 
 for task in task_list:

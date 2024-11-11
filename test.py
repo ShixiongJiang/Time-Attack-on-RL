@@ -12,7 +12,7 @@ import json
 
 
 # env = SafetyPointGoal1_time(render_mode=None)
-if os.path.exists('./figs'):
+if not os.path.exists('./figs'):
     os.makedirs('./figs')
 # policy_kwargs = dict(activation_fn=torch.nn.ReLU,
 #                      net_arch=dict(pi=[128, 64], vf=[128, 64]))
@@ -34,29 +34,92 @@ if os.path.exists('./figs'):
 # # init the PPO Lag agent with default parameters
 # agent = PPOLagAgent(env, logger)
 # agent.policy.load_state_dict(torch.load('model/advPPOLag_policy_for_pointgoal1_baseline.pth'))
+def fgsm_attack(observation, epsilon, model):
+    """
+    Performs the FGSM attack on the given observation.
+
+    Args:
+        observation (numpy.ndarray): The original observation.
+        epsilon (float): The perturbation magnitude.
+        policy (nn.Module): The trained policy network.
+
+    Returns:
+        torch.Tensor: The perturbed observation.
+    """
+    # Convert observation to tensor and enable gradient
+    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+
+    obs_tensor = torch.from_numpy(observation).float().unsqueeze(0).to(device)  # Shape: [1, obs_size]
+    obs_tensor.requires_grad = True
+
+    with torch.enable_grad():
+        distribution = model.policy.get_distribution(obs_tensor)
+
+        # Sample action (or take the mean action)
+        action = distribution.get_actions()
+        log_prob = distribution.log_prob(action)
+
+        # Calculate loss as negative log probability of the selected action
+        loss = -log_prob
+
+        # Backward pass to compute gradients
+        model.policy.optimizer.zero_grad()
+        loss.backward()
+
+    # Collect the sign of the gradients
+    sign_data_grad = obs_tensor.grad.data.sign()
+
+    # Create the perturbed observation
+    perturbed_obs = obs_tensor + epsilon * sign_data_grad
+
+    # Move perturbed observation back to CPU and convert to numpy
+    perturbed_obs = perturbed_obs.detach().cpu().numpy()[0]
+    return perturbed_obs
+def Random(observation, epsilon):
+    noise = np.random.uniform(low=-epsilon, high=epsilon, size=observation.shape)
+
+    # Add noise to the observation
+    perturbed_observation = observation + noise
+
+    return perturbed_observation
+
 task_list = ['Goal', 'Push', 'Button', 'Race']
-alg_list = [PPO, A2C, SAC, TD3]
+adv_method_list = ['Optimal Time Attack', 'FGSM Attack', 'Random']
 render_mode = None
 # policy_kwargs = dict(activation_fn=th.nn.ReLU,
 #                      net_arch=dict(pi=[128, 64], vf=[128, 64]))
+fig, ax = plt.subplots()
+fig.set_figheight(4.6)
+fig.set_figwidth(12)
+plt.yticks(fontsize=36)
+plt.xticks(fontsize=36)
+plt.xlabel('Perturbation Range', fontsize='36')
+plt.ylabel('Time',fontsize='36')
+plt.legend(fontsize=26)
 
+
+plt.tight_layout()  # Adjust layout to not cut off any labels or legends
 for task in task_list:
     color_list = ['purple', "red", "green","orange"]
     color_iterator = iter(color_list)
-    for alg in alg_list:
-        alg_name = alg.__name__
+    for adv_method in adv_method_list:
+        alg_name = 'PPO'
         env_id = f'SafetyPoint{task}0-v0'
 
         victim_file = f'./model/SafetyPoint{task}0-{alg_name}.zip'
         adv_file = f'./model/SAMDP_SafetyPoint{task}0-{alg_name}.zip'
+        avg_time_list = []
+        cost_sum_list = []
+        avg_timd_std_list = []
         if not os.path.exists(victim_file) or not os.path.exists(adv_file):
-            print("File exists!")
+            print("File not exists!")
             continue
 
-        victim_model = alg.load(victim_file)
+        victim_model = PPO.load(victim_file)
         SAMDP_goal_env = SAMDP_env(env_id=env_id, render_mode=render_mode, victim_model=victim_model)
         env = SAMDP_goal_env
         adv_model = PPO.load(adv_file)
+
         total_reward = 0
         total_reach = 0
         total_violate = 0
@@ -65,9 +128,7 @@ for task in task_list:
         epsilon_list = [ 0.01, 0.03, 0.05, 0.07, 0.10]
         total_eposide = 50
         seed = [1,2,3,4,5]
-        avg_time_list = []
-        cost_sum_list = []
-        avg_timd_std_list = []
+
         for epsilon in epsilon_list:
             cost = 0
             reach_count = 1
@@ -75,13 +136,17 @@ for task in task_list:
             eposide = 0
             time_list = []
             while eposide < total_eposide:
-
-                action, _state = adv_model.predict(obs)
+                if adv_method == 'Optimal Time Attack':
+                    perturbed_obs, _state = adv_model.predict(obs)
+                elif adv_method == 'FGSM Attack':
+                    perturbed_obs = fgsm_attack(obs, epsilon=epsilon, model=victim_model)
+                elif adv_method == 'Random':
+                    perturbed_obs = Random(observation=obs, epsilon=epsilon)
                 # print(action)
-                action = np.where(action > epsilon, epsilon, action)
-                action = np.where(action < -epsilon, -epsilon, action)
+                perturbed_obs = np.where(perturbed_obs > epsilon, epsilon, perturbed_obs)
+                perturbed_obs = np.where(perturbed_obs < -epsilon, -epsilon, perturbed_obs)
                 # print(action)
-                obs, reward, done, trun, info = env.step(action)
+                obs, reward, done, trun, info = env.step(perturbed_obs)
                 if 'goal_met' in info:
                     if info['goal_met']:
                         reach_count += 1
@@ -108,9 +173,9 @@ for task in task_list:
         }
 
         # Save to JSON file
-        with open(f'./figs/{task}{alg_name}-data.json', 'w') as f:
+        with open(f'./figs/{task}{adv_method}-data.json', 'w') as f:
             json.dump(data, f)
-        plt.plot(epsilon_list, avg_time_list, color=color, label=f"Line {alg_name}")
+        plt.plot(epsilon_list, avg_time_list, color=color, label=f"Line {adv_method}")
         plt.fill_between(epsilon_list, np.array(avg_time_list) - np.array(avg_timd_std_list), np.array(avg_time_list) + np.array(avg_timd_std_list), color=color, alpha=0.2)
 
     # plt.xlabel("Perturbation range")
