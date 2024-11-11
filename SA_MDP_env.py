@@ -116,6 +116,7 @@ class SAMDP_env(gymnasium.Env):
         # self.env = safety_gymnasium_env
         self.observation_space = self.env.observation_space
         state_dim = self.env.observation_space.shape[0]
+
         pertub_constraint_los = np.ones(shape=state_dim) * self.epsilon * -1
         pertub_constraint_hig = np.ones(shape=state_dim) * self.epsilon
         self.action_space = gymnasium.spaces.Box(low=pertub_constraint_los, high=pertub_constraint_hig, dtype=np.float32)
@@ -159,7 +160,7 @@ class SAMDP_env(gymnasium.Env):
         # action = action[0].squeeze().detach().numpy()
 
         action, _ = self.victim_model.predict(self.last_obs)
-
+        # print(action)
         obs, rew, done, truncated, info = self.env.step(action)
         # info['cost'] = info['cost_hazards']
         self.obs = obs

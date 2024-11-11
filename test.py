@@ -1,79 +1,170 @@
-from stable_baselines3 import PPO
+import os.path
+from SA_MDP_env import SAMDP_env
+
+from stable_baselines3 import PPO, A2C, SAC, TD3
 import torch
-from SA_MDP_env import SAMDP_safetygoal1_env, safetygoal1_env
+from SA_MDP_env import SAMDP_safetygoal1_env
 from fsrl.agent import PPOLagAgent
 from fsrl.utils import TensorboardLogger
 import numpy as np
 import matplotlib.pyplot as plt
+import json
+
+
 # env = SafetyPointGoal1_time(render_mode=None)
+if os.path.exists('./figs'):
+    os.makedirs('./figs')
+# policy_kwargs = dict(activation_fn=torch.nn.ReLU,
+#                      net_arch=dict(pi=[128, 64], vf=[128, 64]))
+#
+# # model = PPO("MlpPolicy", env, verbose=1, policy_kwargs=policy_kwargs, tensorboard_log="./ppo_pointgoal0_delayTime/")
+# base_env = safetygoal1_env(render_mode=None)
+#
+#
+# task = "Safetypointgoal-v1"
+# logger = TensorboardLogger("logs", log_txt=True, name=task)
+#
+# agent_baseline = PPOLagAgent(base_env)
+# agent_baseline.policy.load_state_dict(torch.load('model/PPOLag_policy_for_pointgoal1_baseline.pth'))
+# # print(agent_baseline.policy.actor.forward())
+#
+# env = SAMDP_safetygoal1_env(victim_model=agent_baseline.policy, render_mode='human')
+#
+#
+# # init the PPO Lag agent with default parameters
+# agent = PPOLagAgent(env, logger)
+# agent.policy.load_state_dict(torch.load('model/advPPOLag_policy_for_pointgoal1_baseline.pth'))
+task_list = ['Goal', 'Push', 'Button', 'Race']
+alg_list = [PPO, A2C, SAC, TD3]
+render_mode = None
+# policy_kwargs = dict(activation_fn=th.nn.ReLU,
+#                      net_arch=dict(pi=[128, 64], vf=[128, 64]))
 
+for task in task_list:
+    color_list = ['purple', "red", "green","orange"]
+    color_iterator = iter(color_list)
+    for alg in alg_list:
+        alg_name = alg.__name__
+        env_id = f'SafetyPoint{task}0-v0'
 
-policy_kwargs = dict(activation_fn=torch.nn.ReLU,
-                     net_arch=dict(pi=[128, 64], vf=[128, 64]))
+        victim_file = f'./model/SafetyPoint{task}0-{alg_name}.zip'
+        adv_file = f'./model/SAMDP_SafetyPoint{task}0-{alg_name}.zip'
+        if not os.path.exists(victim_file) or not os.path.exists(adv_file):
+            print("File exists!")
+            continue
 
-# model = PPO("MlpPolicy", env, verbose=1, policy_kwargs=policy_kwargs, tensorboard_log="./ppo_pointgoal0_delayTime/")
-base_env = safetygoal1_env(render_mode=None)
-
-
-task = "Safetypointgoal-v1"
-logger = TensorboardLogger("logs", log_txt=True, name=task)
-
-agent_baseline = PPOLagAgent(base_env)
-agent_baseline.policy.load_state_dict(torch.load('model/PPOLag_policy_for_pointgoal1_baseline.pth'))
-# print(agent_baseline.policy.actor.forward())
-
-env = SAMDP_safetygoal1_env(victim_model=agent_baseline.policy, render_mode='human')
-
-
-# init the PPO Lag agent with default parameters
-agent = PPOLagAgent(env, logger)
-agent.policy.load_state_dict(torch.load('model/advPPOLag_policy_for_pointgoal1_baseline.pth'))
-
-total_reward = 0
-total_reach = 0
-total_violate = 0
-eposide = 0
-epsilon = 0.1
-obs, info = env.reset()
-epsilon_list = [ 0.01, 0.3, 0.4]
-total_eposide = 30
-avg_time_list = []
-cost_sum_list = []
-for epsilon in epsilon_list:
-    cost = 0
-    reach_count = 1
-    avg_time_total = 0
-    eposide = 0
-
-    while eposide < total_eposide:
-        tensor = torch.from_numpy(obs)
-
-        tensor = tensor.unsqueeze(0)
-        action, _state = agent.policy.actor.forward(tensor)
-        action = action[0].squeeze().detach().numpy()
-        action = np.where(action > epsilon, epsilon, action)
-        action = np.where(action < -epsilon, -epsilon, action)
-        # print(action)
-        obs, reward, done, trun, info = env.step(action)
-        if 'goal_met' in info:
-            if info['goal_met']:
-                reach_count += 1
-        # print(obs[12:28])
-        cost += info['cost_hazards']
-        if done or trun:
-            eposide += 1
-            avg_time_total += env.steps / reach_count
+        victim_model = alg.load(victim_file)
+        SAMDP_goal_env = SAMDP_env(env_id=env_id, render_mode=render_mode, victim_model=victim_model)
+        env = SAMDP_goal_env
+        adv_model = PPO.load(adv_file)
+        total_reward = 0
+        total_reach = 0
+        total_violate = 0
+        eposide = 0
+        obs, info = env.reset()
+        epsilon_list = [ 0.01, 0.03, 0.05, 0.07, 0.10]
+        total_eposide = 50
+        seed = [1,2,3,4,5]
+        avg_time_list = []
+        cost_sum_list = []
+        avg_timd_std_list = []
+        for epsilon in epsilon_list:
+            cost = 0
             reach_count = 1
-            env.reset()
+            avg_time_total = 0
+            eposide = 0
+            time_list = []
+            while eposide < total_eposide:
 
-    # print(avg_time_total)
-    avg_time_list.append(avg_time_total / total_eposide)
-    cost_sum_list.append(cost / total_eposide)
+                action, _state = adv_model.predict(obs)
+                # print(action)
+                action = np.where(action > epsilon, epsilon, action)
+                action = np.where(action < -epsilon, -epsilon, action)
+                # print(action)
+                obs, reward, done, trun, info = env.step(action)
+                if 'goal_met' in info:
+                    if info['goal_met']:
+                        reach_count += 1
+                # print(obs[12:28])
+                # cost += info['cost_hazards']
+                if done or trun:
+                    eposide += 1
+                    avg_time_total += env.steps / reach_count
+                    time_list.append(env.steps / reach_count)
+                    reach_count = 1
+                    env.reset()
 
-plt.plot(epsilon_list, avg_time_list, marker='o', linestyle='-', color='b', label='Avg Time')
-# plt.plot(epsilon_list, cost_sum_list, marker='o', linestyle='-', color='r', label='Avg cost')
-plt.show()
+            # print(avg_time_total)
+            avg_time_list.append(avg_time_total / total_eposide)
+            avg_timd_std_list.append(np.std(time_list))
+            # cost_sum_list.append(cost / total_eposide)
 
+        color = next(color_iterator)
+        # print(avg_time_list)
+        # print(avg_timd_std_list)
+        data = {
+            'avg_time_list': avg_time_list,
+            'avg_timd_std_list': avg_timd_std_list
+        }
+
+        # Save to JSON file
+        with open(f'./figs/{task}{alg_name}-data.json', 'w') as f:
+            json.dump(data, f)
+        plt.plot(epsilon_list, avg_time_list, color=color, label=f"Line {alg_name}")
+        plt.fill_between(epsilon_list, np.array(avg_time_list) - np.array(avg_timd_std_list), np.array(avg_time_list) + np.array(avg_timd_std_list), color=color, alpha=0.2)
+
+    # plt.xlabel("Perturbation range")
+    # plt.ylabel("Y-axis")
+    plt.title(f'{task}')
+    plt.legend()
+    # plt.show()
+    plt.savefig(f'./figs/{task}.pdf',bbox_inches='tight', dpi=500)
+# total_reward = 0
+# total_reach = 0
+# total_violate = 0
+# eposide = 0
+# epsilon = 0.1
+# obs, info = env.reset()
+# epsilon_list = [ 0.01, 0.04, 0.7, 0.10]
+# total_eposide = 50
+# seed = [1,2,3,4,5]
+# avg_time_list = []
+# cost_sum_list = []
+# for epsilon in epsilon_list:
+#     cost = 0
+#     reach_count = 1
+#     avg_time_total = 0
+#     eposide = 0
+#
+#     while eposide < total_eposide:
+#         tensor = torch.from_numpy(obs)
+#
+#         tensor = tensor.unsqueeze(0)
+#         action, _state = agent.policy.actor.forward(tensor)
+#         action = action[0].squeeze().detach().numpy()
+#         action = np.where(action > epsilon, epsilon, action)
+#         action = np.where(action < -epsilon, -epsilon, action)
+#         # print(action)
+#         obs, reward, done, trun, info = env.step(action)
+#         if 'goal_met' in info:
+#             if info['goal_met']:
+#                 reach_count += 1
+#         # print(obs[12:28])
+#         cost += info['cost_hazards']
+#         if done or trun:
+#             eposide += 1
+#             avg_time_total += env.steps / reach_count
+#             reach_count = 1
+#             env.reset()
+#
+#     # print(avg_time_total)
+#     avg_time_list.append(avg_time_total / total_eposide)
+#     cost_sum_list.append(cost / total_eposide)
+#
 # plt.plot(epsilon_list, avg_time_list, marker='o', linestyle='-', color='b', label='Avg Time')
-plt.plot(epsilon_list, cost_sum_list, marker='o', linestyle='-', color='r', label='Avg cost')
-plt.show()
+# # plt.plot(epsilon_list, cost_sum_list, marker='o', linestyle='-', color='r', label='Avg cost')
+# plt.show()
+#
+# # # plt.plot(epsilon_list, avg_time_list, marker='o', linestyle='-', color='b', label='Avg Time')
+# # plt.plot(epsilon_list, cost_sum_list, marker='o', linestyle='-', color='r', label='Avg cost')
+# plt.show()
