@@ -9,19 +9,21 @@ task_list = ['Goal', 'Push', 'Button', 'Race']
 adv_method_list = ['Optimal Time Attack', 'FGSM Attack', 'Random']
 
 
-fig, ax = plt.subplots()
-fig.set_figheight(4.6)
-fig.set_figwidth(12)
-plt.yticks(fontsize=36)
-plt.xticks(fontsize=36)
-plt.xlabel('Perturbation Range', fontsize='36')
-plt.ylabel('Time',fontsize='36')
-plt.legend(fontsize=26)
-epsilon_list = [ 0.01, 0.03, 0.05, 0.07, 0.10]
+
 
 for task in task_list:
+    fig, ax = plt.subplots()
+    fig.set_figheight(4.6)
+    fig.set_figwidth(12)
+    plt.yticks(fontsize=36)
+    plt.xticks(fontsize=36)
+    plt.xlabel('Perturbation Range', fontsize='36')
+    plt.ylabel('Time',fontsize='36')
+    plt.legend(fontsize=26)
+    epsilon_list = [ 0.01, 0.03, 0.05, 0.07, 0.10]
     color_list = ['purple', "red", "green","orange"]
     color_iterator = iter(color_list)
+
     for adv_method in adv_method_list:
         file_path = f'./figs/{task}{adv_method}-data.json'
 
