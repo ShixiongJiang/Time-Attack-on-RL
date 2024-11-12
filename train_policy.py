@@ -76,9 +76,9 @@ for task in task_list:
             continue
 
         victim_model = alg.load(f'./model/SafetyPoint{task}{level}-{alg_name}.zip')
-        SAMDP_goal_env = SAMDP_env(env_id=env_id, render_mode=render_mode, victim_model=victim_model)
+        SAMDP_bech_env = SAMDP_env(env_id=env_id, render_mode=render_mode, victim_model=victim_model)
 
-        model = alg("MlpPolicy", SAMDP_goal_env, verbose=0, policy_kwargs=policy_kwargs, tensorboard_log=f"./logs/SAMDP_{alg_name}_{task}{level}_env/")
+        model = alg("MlpPolicy", SAMDP_bech_env, verbose=0, policy_kwargs=policy_kwargs, tensorboard_log=f"./logs/SAMDP_{alg_name}_{task}{level}_env/")
 
         model.learn(total_timesteps=1000000, tb_log_name=f"SAMDP_{task}{level}_env_first")
 

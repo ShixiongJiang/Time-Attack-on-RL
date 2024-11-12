@@ -12,8 +12,8 @@ from stable_baselines3 import A2C, PPO
 
 
 
-class SAMDP_safetygoal1_env(gymnasium.Env):
-    def __init__(self, victim_model=None,epsilon=0.5, config=None, seed=None, render_mode='human', semantics_method_tradition=False):
+class SAMDP_safety_bench_env(gymnasium.Env):
+    def __init__(self, victim_model=None,epsilon=0.5, env_id=None, config=None, seed=None, render_mode='human', semantics_method_tradition=False):
         # super(SafetyPointGoal1, self).__init__()
         self.total_time = 300
         self.safe_dis = 0.4
@@ -21,19 +21,19 @@ class SAMDP_safetygoal1_env(gymnasium.Env):
         self.hazard_dist = None
         self.goal_dist = None
         self.epsilon = epsilon
-        env_id = 'SafetyPointGoal1-v0'
+        if env_id is None:
+            assert 'Please specify env_id'
+        env_id = env_id
         safety_gymnasium_env = safety_gymnasium.make(env_id, render_mode=render_mode)
         # self.env = safety_gymnasium.wrappers.SafetyGymnasium2Gymnasium(safety_gymnasium_env)
         self.env = safety_gymnasium_env
-        # This default action sapce is wrong
-        # self.action_space = self.env.action_space
-        # print(type(self.action_space))
-        pertub_constraint_los = np.ones(shape=60) * self.epsilon * -1
-        pertub_constraint_hig = np.ones(shape=60) * self.epsilon
-        self.action_space = gymnasium.spaces.Box(low=pertub_constraint_los, high=pertub_constraint_hig, dtype=np.float32)
-        # print(type(self.action_space))
+
         self.observation_space = self.env.observation_space
-        self.radius = 0.2
+        state_dim = self.env.observation_space.shape[0]
+
+        pertub_constraint_los = np.ones(shape=state_dim) * self.epsilon * -1
+        pertub_constraint_hig = np.ones(shape=state_dim) * self.epsilon
+        self.action_space = gymnasium.spaces.Box(low=pertub_constraint_los, high=pertub_constraint_hig, dtype=np.float32)
         self.reward_cache = []
         self.avoid_reward_cache = []
         self.final_reward_cache = []
