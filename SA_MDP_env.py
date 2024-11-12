@@ -100,7 +100,7 @@ class SAMDP_safetygoal1_env(gymnasium.Env):
 
 
 class SAMDP_env(gymnasium.Env):
-    def __init__(self, victim_model=None,epsilon=0.5, config=None, seed=None, render_mode='human', env_id=None):
+    def __init__(self, victim_model=None,epsilon=0.5, config=None, seed=None, render_mode='human', env_id=None, level=0):
         # super(SafetyPointGoal1, self).__init__()
         self.total_time = 300
         self.safe_dis = 0.4
@@ -131,6 +131,7 @@ class SAMDP_env(gymnasium.Env):
         self.backdoor_trigger = False
         self.last_state = None
         self.victim_model = victim_model
+        self.level = level
         if self.victim_model == None:
             assert('please assign the victim policy')
 
@@ -152,16 +153,19 @@ class SAMDP_env(gymnasium.Env):
         # print(self.last_obs)
         self.steps += 1
         # print(self.last_obs)
+        if self.level == 1:
+            tensor = torch.from_numpy(self.last_obs)
 
-        # tensor = torch.from_numpy(self.last_obs)
+            tensor = tensor.unsqueeze(0)
+            action, _state = self.victim_model.actor.forward(tensor)
+            action = action[0].squeeze().detach().numpy()
+            obs, rew, done, truncated, info = self.env.step(action)
+            info['cost'] = info['cost_hazards']
 
-        # tensor = tensor.unsqueeze(0)
-        # action, _state = self.victim_model.actor.forward(tensor)
-        # action = action[0].squeeze().detach().numpy()
+        elif self.level == 0:
+            action, _ = self.victim_model.predict(self.last_obs)
 
-        action, _ = self.victim_model.predict(self.last_obs)
-        # print(action)
-        obs, rew, done, truncated, info = self.env.step(action)
+            obs, rew, done, truncated, info = self.env.step(action)
         # info['cost'] = info['cost_hazards']
         self.obs = obs
 
