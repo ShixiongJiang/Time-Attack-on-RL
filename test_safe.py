@@ -8,7 +8,7 @@ from fsrl.utils import TensorboardLogger
 import numpy as np
 import matplotlib.pyplot as plt
 import json
-
+import torch.distributions as distributions
 import safety_gymnasium
 
 # env = SafetyPointGoal1_time(render_mode=None)
@@ -34,7 +34,7 @@ if not os.path.exists('./figs'):
 # # init the PPO Lag agent with default parameters
 # agent = PPOLagAgent(env, logger)
 # agent.policy.load_state_dict(torch.load('model/advPPOLag_policy_for_pointgoal1_baseline.pth'))
-def fgsm_attack(observation, epsilon, model):
+def fgsm_attack(observation, epsilon, model, act_space):
     """
     Performs the FGSM attack on the given observation.
 
@@ -53,22 +53,22 @@ def fgsm_attack(observation, epsilon, model):
     obs_tensor.requires_grad = True
 
     with torch.enable_grad():
-        distribution = model.policy.get_distribution(obs_tensor)
-
-        # Sample action (or take the mean action)
-        action = distribution.get_actions()
-        log_prob = distribution.log_prob(action)
+        mean, log_std = model.actor(obs_tensor)[0]  # Get mean and log_std from the actor network
+        std = torch.exp(log_std)  # Convert log_std to std
+        dist = distributions.Normal(mean, std)
+        action = dist.sample()  # Sample an action from the distribution
+        log_prob = dist.log_prob(action)
+        # action = distribution.get_actions()
+        # log_prob = distribution.log_prob(action)
 
         # Calculate loss as negative log probability of the selected action
-        loss = -log_prob
-
+        loss = -log_prob.sum()
         # Backward pass to compute gradients
-        model.policy.optimizer.zero_grad()
+        model.optim.zero_grad()
         loss.backward()
 
     # Collect the sign of the gradients
     sign_data_grad = obs_tensor.grad.data.sign()
-
     # Create the perturbed observation
     perturbed_obs = obs_tensor + epsilon * sign_data_grad
 
@@ -84,10 +84,11 @@ def Random(observation, epsilon):
     return perturbed_observation
 
 level = 1
-task_list = ['Goal', 'Push', 'Button', 'Race']
+task_list = ['Goal', 'Button']
 # task_list = ['Push']
 adv_method_list = ['Optimal Time Attack', 'FGSM Attack', 'Random']
-render_mode = 'human'
+# adv_method_list = [ 'FGSM Attack', 'Random']
+render_mode = None
 # policy_kwargs = dict(activation_fn=th.nn.ReLU,
 #                      net_arch=dict(pi=[128, 64], vf=[128, 64]))
 fig, ax = plt.subplots()
@@ -113,21 +114,23 @@ for task in task_list:
         avg_time_list = []
         cost_sum_list = []
         avg_timd_std_list = []
-        if not os.path.exists(victim_file) or not os.path.exists(adv_file):
-            print("File not exists!")
-            continue
+        avg_reward_list = []
+        avg_reward_std_list = []
+        # if not os.path.exists(victim_file) or not os.path.exists(adv_file):
+        #     print("File not exists!")
+        #     continue
 
         env = safety_gymnasium.make(env_id, render_mode=render_mode)
         env = safety_gymnasium.wrappers.SafetyGymnasium2Gymnasium(env)
         victim_agent = PPOLagAgent(env)
         victim_agent.policy.load_state_dict(torch.load(f"./model/SafetyPoint{task}{level}-{alg_name}.pth"))
-        victim_model = victim_agent
+        victim_model = victim_agent.policy
 
         SAMDP_goal_env = SAMDP_safety_bench_env(env_id=env_id, render_mode=render_mode, victim_model=victim_model)
 
 
-        env = SAMDP_goal_env
-        adv_agent = PPOLagAgent(env)
+        # SAMDP_env = SAMDP_goal_env
+        adv_agent = PPOLagAgent(SAMDP_goal_env)
         adv_agent.policy.load_state_dict(torch.load(f"./model/SAMDP_SafetyPoint{task}{level}-{alg_name}.pth"))
         adv_model = adv_agent.policy
 
@@ -135,7 +138,7 @@ for task in task_list:
         total_reach = 0
         total_violate = 0
         eposide = 0
-        obs, info = env.reset()
+        obs, info = SAMDP_goal_env.reset()
         epsilon_list = [ 0.01, 0.03, 0.05, 0.07, 0.10]
         total_eposide = 50
         seed = [1,2,3,4,5]
@@ -145,7 +148,10 @@ for task in task_list:
             reach_count = 1
             avg_time_total = 0
             eposide = 0
+            total_reward = 0
             time_list = []
+            reward_list = []
+
             while eposide < total_eposide:
                 if adv_method == 'Optimal Time Attack':
                     tensor = torch.from_numpy(obs)
@@ -153,29 +159,33 @@ for task in task_list:
                     perturbed_obs, _state = adv_model.actor.forward(tensor)
                     perturbed_obs = perturbed_obs[0].squeeze().detach().numpy()
                 elif adv_method == 'FGSM Attack':
-                    perturbed_obs = fgsm_attack(obs, epsilon=epsilon, model=victim_model)
+                    perturbed_obs = fgsm_attack(obs, epsilon=epsilon, model=victim_model, act_space=env.action_space)
                 elif adv_method == 'Random':
                     perturbed_obs = Random(observation=obs, epsilon=epsilon)
                 # print(action)
                 perturbed_obs = np.where(perturbed_obs > epsilon, epsilon, perturbed_obs)
                 perturbed_obs = np.where(perturbed_obs < -epsilon, -epsilon, perturbed_obs)
                 # print(action)
-                obs, reward, done, trun, info = env.step(perturbed_obs)
+                obs, reward, done, trun, info = SAMDP_goal_env.step(perturbed_obs)
                 if 'goal_met' in info:
                     if info['goal_met']:
                         reach_count += 1
                 # print(obs[12:28])
                 # cost += info['cost_hazards']
+                total_reward += reward
                 if done or trun:
                     eposide += 1
-                    avg_time_total += env.steps / reach_count
-                    time_list.append(env.steps / reach_count)
+                    avg_time_total += SAMDP_goal_env.steps / reach_count
+                    time_list.append(SAMDP_goal_env.steps / reach_count)
                     reach_count = 1
-                    env.reset()
+                    SAMDP_goal_env.reset()
+                    reward_list.append(total_reward)
 
             # print(avg_time_total)
             avg_time_list.append(avg_time_total / total_eposide)
             avg_timd_std_list.append(np.std(time_list))
+            avg_reward_list.append(reward_list)
+            avg_reward_std_list.append(np.std(reward_list))
             # cost_sum_list.append(cost / total_eposide)
 
         color = next(color_iterator)
@@ -183,7 +193,9 @@ for task in task_list:
         # print(avg_timd_std_list)
         data = {
             'avg_time_list': avg_time_list,
-            'avg_timd_std_list': avg_timd_std_list
+            'avg_timd_std_list': avg_timd_std_list,
+            'avg_reward_list': avg_reward_list,
+            'avg_reward_std_list': avg_reward_std_list
         }
 
         # Save to JSON file
@@ -197,7 +209,7 @@ for task in task_list:
     plt.title(f'{task}')
     plt.legend()
     # plt.show()
-    plt.savefig(f'./figs/{task}.pdf',bbox_inches='tight', dpi=500)
+    plt.savefig(f'./figs/{task}{level}.pdf',bbox_inches='tight', dpi=500)
 # total_reward = 0
 # total_reach = 0
 # total_violate = 0

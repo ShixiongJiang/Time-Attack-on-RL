@@ -3,7 +3,7 @@ from SA_MDP_env import SAMDP_env
 
 from stable_baselines3 import PPO, A2C, SAC, TD3
 import torch
-from SA_MDP_env import SAMDP_safetygoal1_env
+# from SA_MDP_env import SAMDP_safetygoal1_env
 from fsrl.agent import PPOLagAgent
 from fsrl.utils import TensorboardLogger
 import numpy as np
@@ -60,7 +60,7 @@ def fgsm_attack(observation, epsilon, model):
         log_prob = distribution.log_prob(action)
 
         # Calculate loss as negative log probability of the selected action
-        loss = -log_prob
+        loss = -log_prob.sum()
 
         # Backward pass to compute gradients
         model.policy.optimizer.zero_grad()
@@ -83,9 +83,11 @@ def Random(observation, epsilon):
 
     return perturbed_observation
 
-task_list = ['Goal', 'Push', 'Button', 'Race']
+level = 0
+task_list = ['Goal', 'Button', 'Push']
+# task_list = ['Push']
 adv_method_list = ['Optimal Time Attack', 'FGSM Attack', 'Random']
-render_mode = None
+render_mode = 'human'
 # policy_kwargs = dict(activation_fn=th.nn.ReLU,
 #                      net_arch=dict(pi=[128, 64], vf=[128, 64]))
 fig, ax = plt.subplots()
@@ -111,9 +113,11 @@ for task in task_list:
         avg_time_list = []
         cost_sum_list = []
         avg_timd_std_list = []
-        if not os.path.exists(victim_file) or not os.path.exists(adv_file):
-            print("File not exists!")
-            continue
+        avg_reward_list = []
+        avg_reward_std_list = []
+        # if not os.path.exists(victim_file) or not os.path.exists(adv_file):
+        #     print("File not exists!")
+        #     continue
 
         victim_model = PPO.load(victim_file)
         SAMDP_goal_env = SAMDP_env(env_id=env_id, render_mode=render_mode, victim_model=victim_model)
@@ -134,7 +138,9 @@ for task in task_list:
             reach_count = 1
             avg_time_total = 0
             eposide = 0
+            total_reward = 0
             time_list = []
+            reward_list = []
             while eposide < total_eposide:
                 if adv_method == 'Optimal Time Attack':
                     perturbed_obs, _state = adv_model.predict(obs)
@@ -147,22 +153,31 @@ for task in task_list:
                 perturbed_obs = np.where(perturbed_obs < -epsilon, -epsilon, perturbed_obs)
                 # print(action)
                 obs, reward, done, trun, info = env.step(perturbed_obs)
-                if 'goal_met' in info:
-                    if info['goal_met']:
-                        reach_count += 1
-                # print(obs[12:28])
-                # cost += info['cost_hazards']
+                total_reward += reward
                 if done or trun:
                     eposide += 1
-                    avg_time_total += env.steps / reach_count
-                    time_list.append(env.steps / reach_count)
+                    avg_time_total += SAMDP_goal_env.steps / reach_count
+                    time_list.append(SAMDP_goal_env.steps / reach_count)
                     reach_count = 1
-                    env.reset()
+                    SAMDP_goal_env.reset()
+                    reward_list.append(total_reward)
 
-            # print(avg_time_total)
+                # print(avg_time_total)
             avg_time_list.append(avg_time_total / total_eposide)
             avg_timd_std_list.append(np.std(time_list))
+            avg_reward_list.append(reward_list)
+            avg_reward_std_list.append(np.std(reward_list))
             # cost_sum_list.append(cost / total_eposide)
+
+        color = next(color_iterator)
+        # print(avg_time_list)
+        # print(avg_timd_std_list)
+        data = {
+            'avg_time_list': avg_time_list,
+            'avg_timd_std_list': avg_timd_std_list,
+            'avg_reward_list': avg_reward_list,
+            'avg_reward_std_list': avg_reward_std_list
+        }
 
         color = next(color_iterator)
         # print(avg_time_list)
@@ -173,7 +188,7 @@ for task in task_list:
         }
 
         # Save to JSON file
-        with open(f'./figs/{task}{adv_method}-data.json', 'w') as f:
+        with open(f'./figs/{task}{adv_method}{level}-data.json', 'w') as f:
             json.dump(data, f)
         plt.plot(epsilon_list, avg_time_list, color=color, label=f"Line {adv_method}")
         plt.fill_between(epsilon_list, np.array(avg_time_list) - np.array(avg_timd_std_list), np.array(avg_time_list) + np.array(avg_timd_std_list), color=color, alpha=0.2)
@@ -183,7 +198,7 @@ for task in task_list:
     plt.title(f'{task}')
     plt.legend()
     # plt.show()
-    plt.savefig(f'./figs/{task}.pdf',bbox_inches='tight', dpi=500)
+    plt.savefig(f'./figs/{task}{level}.pdf',bbox_inches='tight', dpi=500)
 # total_reward = 0
 # total_reach = 0
 # total_violate = 0
