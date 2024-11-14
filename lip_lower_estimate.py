@@ -76,17 +76,33 @@ def example_policy_gradient(observation):
     obs_tensor.requires_grad = True
 
     with torch.enable_grad():
-        action = model.policy.forward(obs_tensor)[0]
+        # action = model.policy.forward(obs_tensor)[0]
+        #
+        # # Sample action (or take the mean action)
+        # # action = distribution.get_actions()
+        # # log_prob = distribution.log_prob(action)
+        #
+        # # Calculate loss as negative log probability of the selected action
+        # loss = -action.sum()
+        # # Backward pass to compute gradients
+        # model.policy.optimizer.zero_grad()
+        # loss.backward(retain_graph=True)
 
-        # Sample action (or take the mean action)
+        mean, log_std = model.actor(obs_tensor)[0]  # Get mean and log_std from the actor network
+        # print(mean)
+        # std = torch.exp(log_std)  # Convert log_std to std
+        # dist = distributions.Normal(mean, std)
+        # action = dist.sample()  # Sample an action from the distribution
+        # log_prob = dist.log_prob(action)
         # action = distribution.get_actions()
         # log_prob = distribution.log_prob(action)
 
         # Calculate loss as negative log probability of the selected action
-        loss = -action.sum()
+        # loss = -log_prob.sum()
         # Backward pass to compute gradients
-        model.policy.optimizer.zero_grad()
-        loss.backward(retain_graph=True)
+        loss = -mean.sum()
+        model.optim.zero_grad()
+        loss.backward()
 
     # print(obs_tensor.grad.data)
     # Collect the sign of the gradients
@@ -95,29 +111,33 @@ def example_policy_gradient(observation):
 
 
 
-level = 0
+level = 1
 epsilon_list = [ 0.01, 0.03, 0.05, 0.07, 0.10]
 
 render_mode = None
-task_list = ['Goal', 'Button', 'Race']
+task_list = ['Goal', 'Button', 'Push','Race']
 alg_name = PPO.__name__
+alg_name = PPOLagAgent.__name__
 for task in task_list:
     state_space = []
 
-    file = f'./model/SafetyPoint{task}0-{alg_name}.zip'
+    file = f'./model/SafetyPoint{task}{level}-{alg_name}.pth'
 
     if not os.path.exists(file):
         print("File not exists!")
         continue
-    victim_model = PPO.load(file)
+    # victim_model = PPO.load(file)
     env_id = f'SafetyPoint{task}{level}-v0'
 
     env = safety_gymnasium.make(env_id, render_mode=render_mode)
     env = safety_gymnasium.wrappers.SafetyGymnasium2Gymnasium(env)
     input_dim = env.observation_space.shape[0]
     output_dim = env.action_space.shape[0]  # Example output dimension
-    model = PPO.load(f'./model/SafetyPoint{task}{level}-{alg_name}.zip')
-    policy_net = model.policy
+    # model = PPO.load(f'./model/SafetyPoint{task}{level}-{alg_name}.zip')
+    # policy_net = model.policy
+    agent = PPOLagAgent(env)
+    agent.policy.load_state_dict(torch.load(f"./model/SafetyPoint{task}{level}-{alg_name}.pth"))
+    model = agent.policy
 
     total_eposide = 1
     eposide = 0
